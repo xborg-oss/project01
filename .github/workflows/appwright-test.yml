@@ -1,34 +1,62 @@
 name: AppWright Test
-
 on: [push]
 
 jobs:
   run-tests:
     runs-on: ubuntu-latest
 
+    services:
+      db:
+        image: postgres:14
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: qgjob
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+      redis:
+        image: redis:6-alpine
+        ports:
+          - 6379:6379
+        options: --health-cmd="redis-cli ping" --health-interval=5s --health-retries=5
+
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout repo
+      uses: actions/checkout@v3
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v4
       with:
         python-version: "3.11"
 
-    - name: Install qgjob CLI from PyPI
+    - name: Install Docker Compose
+      run: sudo apt-get update && sudo apt-get install -y docker-compose
+
+    - name: Build and start backend
+      run: docker-compose up -d --build --scale agent=3
+
+    - name: Wait for API to be ready
+      run: |
+        echo "Waiting for job-server..."
+        for i in {1..20}; do
+          curl -s http://localhost:8000/healthz && break || sleep 3
+        done
+
+    - name: Install CLI
       run: pip install qgjob
 
-    - name: Submit AppWright test and poll for status
+    - name: Submit job and poll
       env:
-        QGJOB_API_BASE_URL: http://localhost:8000  # or your deployed job-server API
+        QGJOB_API_BASE_URL: http://localhost:8000
       run: |
-        qgjob submit \
-          --org-id=qualgent \
-          --app-version-id=xyz123 \
-          --test=tests/onboarding.spec.ts \
-          --target=emulator \
-          --priority=1
-
-        # Use the latest job ID from server
-        JOB_ID=$(curl -s "$QGJOB_API_BASE_URL/jobs" | jq -r '.[-1].job_id')
+        JOB_OUTPUT=$(qgjob submit --org-id qualgent --app-version-id xyz123 --test tests/onboarding.spec.ts --target emulator)
+        echo "$JOB_OUTPUT"
+        JOB_ID=$(echo "$JOB_OUTPUT" | grep -oP '(?<="job_id": ")[^"]+')
         echo "Polling status for job: $JOB_ID"
-        qgjob status --job-id "$JOB_ID" --poll
+        qgjob status --job-id $JOB_ID --poll
