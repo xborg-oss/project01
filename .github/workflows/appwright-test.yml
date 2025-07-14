@@ -25,36 +25,43 @@ jobs:
           chmod +x ~/.docker/cli-plugins/docker-compose
           docker compose version
 
-      - name: Clean up previous Docker containers
-        run: |
-          docker compose down --volumes --remove-orphans || true
+      - name: Clean up Old containers
+        run: docker compose down --volumes --remove-orphans || true
 
       - name: Start backend and agents
         run: |
           docker compose up -d --build --scale agent=3
           echo "Waiting for job-server to become healthy..."
-          for i in {1..15}; do
+          for i in {1..20}; do
             if curl -s http://localhost:8000/healthz | grep -q "ok"; then
               echo "job-server is up"
               break
             fi
             sleep 3
           done
+          docker compose ps
+          docker compose logs job-server
 
       - name: Install qgjob CLI
         run: pip install qgjob
 
       - name: Submit test job
         id: submit
+        env:
+          QGJOB_API_BASE_URL: http://localhost:8000
         run: |
           echo "Submitting test job..."
-          JOB_OUTPUT=$(qgjob submit --org-id=qualgent --app-version-id=xyz123 --test=tests/onboarding.spec.ts --priority=1 --target=emulator)
-          echo "$JOB_OUTPUT"
-          JOB_ID=$(echo "$JOB_OUTPUT" | sed -n "s/.*'job_id': '\([^']*\)'.*/\1/p")
+          OUTPUT=$(qgjob submit --org-id=qualgent7 --app-version-id=abc123 --test=tests/login.spec.ts --target=emulator --priority=2)
+          echo "$OUTPUT"
+
+          # Extract job_id safely from JSON-like dict string
+          JOB_ID=$(echo "$OUTPUT" | sed -n "s/.*'job_id': '\([^']*\)'.*/\1/p")
           echo "Extracted job_id=$JOB_ID"
           echo "job_id=$JOB_ID" >> "$GITHUB_OUTPUT"
 
       - name: Poll test status
+        env:
+          QGJOB_API_BASE_URL: http://localhost:8000
         run: |
           echo "Polling status for job: ${{ steps.submit.outputs.job_id }}"
           qgjob status --job-id=${{ steps.submit.outputs.job_id }} --poll
