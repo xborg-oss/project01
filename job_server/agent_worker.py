@@ -44,7 +44,13 @@ def poll_and_execute(target: str, app_version_id: str):
 
             # Simulate test execution
             time.sleep(3)
-            status = random.choice(["completed", "failed"])
+            # Deterministic result based on test_path
+            if "fail" in test_path:
+                status = "failed"
+            elif "pass" in test_path or "onboarding" in test_path:
+                status = "completed"
+            else:
+                status = random.choice(["completed", "failed"])
             print(f"[Agent] Job {job_id} finished with status: {status}")
 
             # Report job completion
