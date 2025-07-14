@@ -24,6 +24,7 @@ graph TD
         CLI[qgjob CLI]
         Actions[GitHub Actions]
     end
+
     subgraph Backend
         API[Job Server API]
         DB[(Postgres DB)]
@@ -31,9 +32,11 @@ graph TD
         Scheduler[Scheduler]
         Agent[Agent Worker(s)]
     end
+
     subgraph Test Infra
         Device[Device/Emulator/BrowserStack]
     end
+
     CLI -- REST --> API
     Actions -- REST --> API
     API -- Persist --> DB
@@ -43,6 +46,7 @@ graph TD
     Agent -- Update Status --> API
     API -- Status --> CLI
     API -- Status --> Actions
+
 ```
 
 ---
