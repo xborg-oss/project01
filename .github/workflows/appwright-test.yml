@@ -48,23 +48,16 @@ jobs:
         id: submit
         run: |
           echo "Submitting test job..."
-          job_output=$(qgjob submit \
-            --org-id=qualgent \
-            --app-version-id=ci-${{ github.run_id }} \
-            --test=tests/onboarding.spec.ts \
-            --target=emulator \
-            --priority=1
-          )
-
-          echo "$job_output"
-          job_id=$(echo "$job_output" | grep -oP '"job_id":\s*"\K[^"]+')
-          echo "job_id=$job_id" >> $GITHUB_OUTPUT
-          echo "JOB_ID=$job_id" >> $GITHUB_ENV
+          JOB_OUTPUT=$(qgjob submit --org-id=qualgent --app-version-id=xyz123 --test=tests/onboarding.spec.ts --priority=1 --target=emulator)
+          echo "$JOB_OUTPUT"
+          JOB_ID=$(echo "$JOB_OUTPUT" | python3 -c "import sys, json; print(json.load(sys.stdin)['job_id'])")
+          echo "job_id=$JOB_ID" >> $GITHUB_ENV
+          echo "::set-output name=job_id::$JOB_ID"
 
       - name: Poll test status
         run: |
-          echo "Polling status for job: $JOB_ID"
-          qgjob status --job-id=$JOB_ID --poll
+          echo "Polling status for job: ${{ steps.submit.outputs.job_id }}"
+          qgjob status --job-id=${{ steps.submit.outputs.job_id }} --poll
 
       - name: Cleanup containers
         if: always()
