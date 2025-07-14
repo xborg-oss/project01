@@ -51,7 +51,7 @@ jobs:
           QGJOB_API_BASE_URL: http://localhost:8000
         run: |
           echo "Submitting test job..."
-          OUTPUT=$(qgjob submit --org-id=qualgent --app-version-id=abc123 --test=tests/onboarding.spec.ts --target=emulator --priority=2)
+          OUTPUT=$(qgjob submit --org-id=qualgent --app-version-id=abc123 --test=tests/pass.spec.ts --target=emulator --priority=2)
           echo "$OUTPUT"
 
           JOB_ID=$(echo "$OUTPUT" | sed -n "s/.*'job_id': '\([^']*\)'.*/\1/p")

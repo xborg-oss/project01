@@ -56,7 +56,7 @@ services:
       job-server:
         condition: service_started
     environment:
-      - QGJOB_API_BASE_URL=http://job-server:8000   # 👈 Fix hostname
+      - QGJOB_API_BASE_URL=http://job-server:8000
       - PYTHONPATH=/app
     volumes:
       - .:/app
