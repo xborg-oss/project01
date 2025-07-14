@@ -43,7 +43,7 @@ jobs:
           docker compose logs job-server
 
       - name: Install qgjob CLI
-        run: pip install qgjob
+        run: pip install --upgrade qgjob==1.2.0
 
       - name: Submit test job
         id: submit
@@ -51,11 +51,9 @@ jobs:
           QGJOB_API_BASE_URL: http://localhost:8000
         run: |
           echo "Submitting test job..."
-          OUTPUT=$(qgjob submit --org-id=qualgent --app-version-id=abc123 --test=tests/pass.spec.ts --target=emulator --priority=2)
+          OUTPUT=$(qgjob submit --org-id=qualgent --app-version-id=abc123 --test=tests/pass.spec.ts --target=emulator --priority=2 --json)
           echo "$OUTPUT"
-
-          JOB_ID=$(echo "$OUTPUT" | sed -n "s/.*'job_id': '\([^']*\)'.*/\1/p")
-          echo "Extracted job_id=$JOB_ID"
+          JOB_ID=$(echo "$OUTPUT" | jq -r '.job_id')
           echo "job_id=$JOB_ID" >> "$GITHUB_OUTPUT"
 
       - name: Poll test status

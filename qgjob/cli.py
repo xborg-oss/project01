@@ -11,7 +11,8 @@ def submit(
     app_version_id: str = typer.Option(..., help="App version identifier"),
     test: str = typer.Option(..., help="Path to the AppWright test script"),
     priority: int = typer.Option(5, help="Job priority (lower is higher)"),
-    target: str = typer.Option("emulator", help="Target: emulator, device, browserstack")
+    target: str = typer.Option("emulator", help="Target: emulator, device, browserstack"),
+    json_output: bool = typer.Option(False, "--json", help="Output result as JSON for CI parsing")
 ):
     """Submit a new test job."""
     if target not in VALID_TARGETS:
@@ -19,8 +20,12 @@ def submit(
         raise typer.Exit(1)
     result = submit_job(org_id, app_version_id, test, priority, target)
     if isinstance(result, dict):
-        typer.secho(f"Job submitted! ID: {result.get('job_id')} | Status: {result.get('status')}", fg=typer.colors.GREEN)
-        typer.echo(result.get('message', ''))
+        if json_output:
+            import json as _json
+            typer.echo(_json.dumps(result))
+        else:
+            typer.secho(f"Job submitted! ID: {result.get('job_id')} | Status: {result.get('status')}", fg=typer.colors.GREEN)
+            typer.echo(result.get('message', ''))
     else:
         typer.secho(result, fg=typer.colors.RED)
         raise typer.Exit(1)
