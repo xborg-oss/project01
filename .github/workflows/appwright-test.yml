@@ -25,7 +25,7 @@ jobs:
         run: docker compose down --volumes --remove-orphans || true
       - name: Start backend and agents
         run: |
-          docker compose up -d --build --scale agent=3
+          docker compose up -d --build
           echo "Waiting for job-server to become healthy..."
           for i in {1..20}; do
             if curl -s http://localhost:8000/healthz | grep -q "ok"; then
