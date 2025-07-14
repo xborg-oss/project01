@@ -1,0 +1,71 @@
+version: "3.9"
+
+services:
+  job-server:
+    build: .
+    container_name: job-server
+    working_dir: /app
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db/qgjob
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - .:/app
+    command: >
+      sh -c "sleep 5 && uvicorn job_server.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  db:
+    image: postgres:14
+    container_name: db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: qgjob
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:6-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  agent:
+    build: .
+    working_dir: /app
+    depends_on:
+      job-server:
+        condition: service_started
+    environment:
+      - QGJOB_API_BASE_URL=http://job-server:8000   # 👈 Fix hostname
+      - PYTHONPATH=/app
+    volumes:
+      - .:/app
+    command: >
+      sh -c "sleep 5 && python job_server/agent_worker.py --target emulator --app-version-id abc123"
+    deploy:
+      replicas: 3
+      restart_policy:
+        condition: on-failure
+
+volumes:
+  pgdata:

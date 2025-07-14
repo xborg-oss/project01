@@ -1,0 +1,442 @@
+tests/onboarding.spec.ts
+```
+import { test, expect } from "appwright";
+
+test("Open Playwright on Wikipedia and verify Microsoft is visible", async ({
+  device,
+}) => {
+  // Dismiss splash screen
+  await device.getByText("Skip").tap();
+
+  // Enter search term
+  const searchInput = device.getByText("Search Wikipedia", { exact: true });
+  await searchInput.tap();
+  await searchInput.fill("playwright");
+
+  // Open search result and assert
+  await device.getByText("Playwright (software)").tap();
+  await expect(device.getByText("Microsoft")).toBeVisible();
+});
+
+```
+
+root folder files
+
+requirements.txt
+```
+fastapi
+uvicorn
+sqlalchemy
+psycopg2-binary
+redis
+requests
+typer
+pydantic
+python-dotenv
+```
+docker-compose.yml
+```
+version: "3.9"
+
+services:
+  job-server:
+    build: .
+    container_name: job-server
+    working_dir: /app
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db/qgjob
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - .:/app
+    command: >
+      sh -c "sleep 5 && uvicorn job_server.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  db:
+    image: postgres:14
+    container_name: db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: qgjob
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:6-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  agent:
+    build: .
+    working_dir: /app
+    depends_on:
+      job-server:
+        condition: service_started
+    environment:
+      - QGJOB_API_BASE_URL=http://job-server:8000   # 👈 Fix hostname
+      - PYTHONPATH=/app
+    volumes:
+      - .:/app
+    command: >
+      sh -c "sleep 5 && python job_server/agent_worker.py --target emulator --app-version-id abc123"
+    deploy:
+      replicas: 3
+      restart_policy:
+        condition: on-failure
+
+volumes:
+  pgdata:
+
+```
+
+Dockerfile.yml
+```
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# System deps
+RUN apt-get update && apt-get install -y build-essential libpq-dev && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+CMD ["uvicorn", "job_server.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+```
+
+current code files in job_server/
+
+
+agent_api.py
+```
+from fastapi import APIRouter
+from job_server.job_queue import dequeue_job
+
+router = APIRouter()
+
+@router.get("/agents/next-job")
+def get_next_job(target: str, app_version_id: str):
+    job = dequeue_job(target, app_version_id)
+    if not job:
+        return {"message": "No job available"}
+    return job
+
+```
+agent_worker.py
+```
+import time
+import requests
+import random
+import argparse
+from job_server.config import API_BASE_URL
+
+POLL_INTERVAL = 5  # seconds
+
+def poll_and_execute(target: str, app_version_id: str):
+    print(f"[Agent] Starting agent for target: {target}, app_version_id: {app_version_id}")
+
+    while True:
+        try:
+            res = requests.get(
+                f"{API_BASE_URL}/agents/next-job",
+                params={"target": target, "app_version_id": app_version_id},
+                timeout=5
+            )
+
+            if res.status_code == 204:
+                print("[Agent] No jobs available. Sleeping 5s...")
+                time.sleep(POLL_INTERVAL)
+                continue
+
+            if res.status_code != 200:
+                print(f"[Agent] Unexpected status code {res.status_code}: {res.text}")
+                time.sleep(POLL_INTERVAL)
+                continue
+
+            try:
+                job = res.json()
+                print("[Agent] Raw job response:", job)
+                job_id = job["job_id"]
+                test_path = job["test_path"]
+            except Exception as e:
+                print(f"[Agent] Failed to parse job response or missing fields: {e}")
+                print("[Agent] Raw response text:", res.text)
+                time.sleep(POLL_INTERVAL)
+                continue
+
+            print(f"[Agent] Running test: {test_path} (Job ID: {job_id})")
+
+            # Simulate test execution
+            time.sleep(3)
+            status = random.choice(["completed", "failed"])
+            print(f"[Agent] Job {job_id} finished with status: {status}")
+
+            # Report job completion
+            response = requests.post(
+                f"{API_BASE_URL}/jobs/{job_id}/status",
+                json={"status": status},
+                timeout=5
+            )
+            if response.status_code != 200:
+                print(f"[Agent] Failed to update job status: {response.status_code} - {response.text}")
+
+        except Exception as e:
+            print(f"[Agent] Error: {e}")
+            time.sleep(POLL_INTERVAL)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Agent worker to process jobs.")
+    parser.add_argument("--target", type=str, default="emulator", help="Target type (emulator, device, browserstack)")
+    parser.add_argument("--app-version-id", type=str, default="abc123", help="App version ID")
+    args = parser.parse_args()
+
+    poll_and_execute(args.target, args.app_version_id)
+
+```
+config.py
+
+```
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost/qgjob")
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+API_BASE_URL = os.getenv("QGJOB_API_BASE_URL", "http://localhost:8000")
+
+```
+db.py
+
+```
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
+from job_server.config import DATABASE_URL
+
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+```
+
+job_api.py
+```
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from job_server.schemas import JobCreate, JobResponse, JobStatus, JobStatusUpdate
+from job_server.db import SessionLocal
+from job_server.scheduler import schedule_job
+from job_server.models import Job
+from sqlalchemy.exc import IntegrityError
+from fastapi.responses import JSONResponse
+
+router = APIRouter()
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+@router.post("/jobs", response_model=JobResponse)
+def submit_job(job: JobCreate, db: Session = Depends(get_db)):
+    try:
+        job_id = schedule_job(db, job)
+        return {"job_id": job_id, "status": "queued", "message": "Job submitted."}
+    except IntegrityError:
+        db.rollback()
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Duplicate job exists with the same org_id, app_version_id, test_path, and target."},
+        )
+
+@router.get("/jobs/{job_id}/status", response_model=JobStatus)
+def get_job_status(job_id: str, db: Session = Depends(get_db)):
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {
+        "job_id": job.id,
+        "status": job.status,
+        "test_path": job.test_path,
+        "app_version_id": job.app_version_id,
+        "created_at": job.created_at,
+    }
+
+@router.post("/jobs/{job_id}/status")
+def update_job_status(job_id: str, update: JobStatusUpdate, db: Session = Depends(get_db)):
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    job.status = update.status
+    db.commit()
+    return {"message": f"Job {job_id} updated to {update.status}"}
+
+```
+job_queue.py
+
+```
+import redis
+import json
+from job_server.config import REDIS_URL
+
+r = redis.Redis.from_url(REDIS_URL)
+
+def enqueue_job(job_data):
+    key = f"queue:{job_data['target']}:{job_data['app_version_id']}"
+    r.rpush(key, json.dumps(job_data))
+
+def dequeue_job(target, app_version_id):
+    key = f"queue:{target}:{app_version_id}"
+    job_json = r.lpop(key)
+    return json.loads(job_json) if job_json else None
+
+```
+main.py
+```
+from fastapi import FastAPI
+from job_server.job_api import router as job_router
+from job_server.agent_api import router as agent_router
+from job_server.monitoring import router as monitoring_router
+from job_server.db import Base, engine
+
+Base.metadata.create_all(bind=engine)
+
+app = FastAPI(title="AppWright Job Orchestrator")
+
+app.include_router(job_router)
+app.include_router(agent_router)
+app.include_router(monitoring_router)
+
+```
+models.py
+```
+from sqlalchemy import Column, String, Integer, DateTime, Enum, ForeignKey, UniqueConstraint
+from sqlalchemy.sql import func
+from job_server.db import Base
+
+class Job(Base):
+    __tablename__ = "jobs"
+    id = Column(String, primary_key=True, index=True)
+    org_id = Column(String, index=True)
+    app_version_id = Column(String, index=True)
+    test_path = Column(String)
+    priority = Column(Integer, default=5)
+    target = Column(String)
+    status = Column(String, default="queued")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("org_id", "app_version_id", "test_path", "target", name="uq_job_dedup"),
+    )
+
+```
+monitoring.py
+```
+from fastapi import APIRouter
+
+router = APIRouter()
+
+@router.get("/healthz")
+def health_check():
+    return {"status": "ok"}
+
+@router.get("/metrics")
+def basic_metrics():
+    return {
+        "status": "ok",
+        "notes": "Prometheus integration is disabled. Use structured logging or DB inspection for now."
+    }
+
+```
+scheduler.py
+```
+from job_server.job_queue import enqueue_job
+import uuid
+from job_server.models import Job
+
+def schedule_job(db, job_create):
+    job_id = str(uuid.uuid4())
+    job_data = {
+        "job_id": job_id,
+        "org_id": job_create.org_id,
+        "app_version_id": job_create.app_version_id,
+        "test_path": job_create.test_path,
+        "priority": job_create.priority,
+        "target": job_create.target,
+    }
+
+    # Queue the job
+    enqueue_job(job_data)
+
+    # Persist to DB
+    job = Job(
+        id=job_id,
+        org_id=job_create.org_id,
+        app_version_id=job_create.app_version_id,
+        test_path=job_create.test_path,
+        priority=job_create.priority,
+        target=job_create.target,
+        status="queued"
+    )
+    db.add(job)
+    db.commit()
+
+    return job_id
+
+```
+schemas.py
+```
+from pydantic import BaseModel
+from datetime import datetime
+
+class JobCreate(BaseModel):
+    org_id: str
+    app_version_id: str
+    test_path: str
+    priority: int
+    target: str
+
+class JobResponse(BaseModel):
+    job_id: str
+    status: str
+    message: str
+
+class JobStatus(BaseModel):
+    job_id: str
+    status: str
+    test_path: str
+    app_version_id: str
+    created_at: datetime
+
+class JobStatusUpdate(BaseModel):
+    status: str  # "completed" or "failed"
+
+```
+
