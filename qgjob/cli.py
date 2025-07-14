@@ -1,7 +1,9 @@
 import typer
 from qgjob.client import submit_job, get_status
 
-app = typer.Typer(help="Submit and monitor AppWright test jobs.")
+VALID_TARGETS = ["emulator", "device", "browserstack"]
+
+app = typer.Typer(help="Submit and monitor AppWright test jobs.\n\nExamples:\n  qgjob submit --org-id=qualgent --app-version-id=xyz123 --test=tests/onboarding.spec.js\n  qgjob status --job-id=abc456 --poll\n")
 
 @app.command()
 def submit(
@@ -12,8 +14,16 @@ def submit(
     target: str = typer.Option("emulator", help="Target: emulator, device, browserstack")
 ):
     """Submit a new test job."""
+    if target not in VALID_TARGETS:
+        typer.secho(f"Invalid target: {target}. Must be one of {', '.join(VALID_TARGETS)}.", fg=typer.colors.RED)
+        raise typer.Exit(1)
     result = submit_job(org_id, app_version_id, test, priority, target)
-    typer.echo(result)
+    if isinstance(result, dict):
+        typer.secho(f"Job submitted! ID: {result.get('job_id')} | Status: {result.get('status')}", fg=typer.colors.GREEN)
+        typer.echo(result.get('message', ''))
+    else:
+        typer.secho(result, fg=typer.colors.RED)
+        raise typer.Exit(1)
 
 @app.command()
 def status(
@@ -31,7 +41,7 @@ def status(
             typer.secho(result, fg=typer.colors.RED)
             sys.exit(1)
 
-        typer.echo(f"Job {job_id} → {result['status']}")
+        typer.secho(f"Job {job_id} → {result['status']}", fg=typer.colors.BLUE if result['status'] == 'in_progress' else (typer.colors.GREEN if result['status'] == 'completed' else typer.colors.RED))
 
         if not poll or result["status"] in ("completed", "failed"):
             sys.exit(1 if result["status"] == "failed" else 0)

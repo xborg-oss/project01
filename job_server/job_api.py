@@ -51,6 +51,28 @@ def update_job_status(job_id: str, update: JobStatusUpdate, db: Session = Depend
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    job.status = update.status
-    db.commit()
-    return {"message": f"Job {job_id} updated to {update.status}"}
+    if update.status == "failed":
+        job.retry_count += 1
+        if job.retry_count < job.max_retries:
+            # Requeue the job
+            from job_server.job_queue import enqueue_job
+            job.status = "queued"
+            db.commit()
+            job_data = {
+                "job_id": job.id,
+                "org_id": job.org_id,
+                "app_version_id": job.app_version_id,
+                "test_path": job.test_path,
+                "priority": job.priority,
+                "target": job.target,
+            }
+            enqueue_job(job_data)
+            return {"message": f"Job {job_id} requeued (retry {job.retry_count}/{job.max_retries})"}
+        else:
+            job.status = "failed"
+            db.commit()
+            return {"message": f"Job {job_id} failed after {job.retry_count} retries"}
+    else:
+        job.status = update.status
+        db.commit()
+        return {"message": f"Job {job_id} updated to {update.status}"}
