@@ -49,20 +49,15 @@ services:
       timeout: 3s
       retries: 5
 
-  agent-abc123:
+  agent-generic:
     build: .
-    command: python job_server/agent_worker.py --target emulator --app-version-id abc123
-    depends_on:
-      - job-server
+    command: python job_server/agent_worker.py --target emulator --app-version-id all
     environment:
       - QGJOB_API_BASE_URL=http://job-server:8000
-  agent-xyz123:
-    build: .
-    command: python job_server/agent_worker.py --target emulator --app-version-id xyz123
     depends_on:
       - job-server
-    environment:
-      - QGJOB_API_BASE_URL=http://job-server:8000
+    volumes:
+      - .:/app
 
 volumes:
   pgdata:
