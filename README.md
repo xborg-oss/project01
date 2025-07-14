@@ -1,4 +1,4 @@
-# QualGent Backend Coding Challenge
+# Backend Coding Challenge
 
 A robust, scalable platform for queuing, grouping, and deploying AppWright test jobs across emulators, devices, and BrowserStack. Includes a CLI, backend orchestrator, and full CI/CD integration.
 
@@ -30,7 +30,7 @@ graph TD
         DB[(Postgres DB)]
         REDIS[(Redis Queue)]
         Scheduler[Scheduler]
-        Agent[Agent Worker(s)]
+        Agent[Agent Workers]
     end
 
     subgraph Test Infra
