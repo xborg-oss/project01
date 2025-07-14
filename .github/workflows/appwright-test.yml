@@ -50,9 +50,9 @@ jobs:
           echo "Submitting test job..."
           JOB_OUTPUT=$(qgjob submit --org-id=qualgent --app-version-id=xyz123 --test=tests/onboarding.spec.ts --priority=1 --target=emulator)
           echo "$JOB_OUTPUT"
-          JOB_ID=$(echo "$JOB_OUTPUT" | python3 -c "import sys, json; print(json.load(sys.stdin)['job_id'])")
-          echo "job_id=$JOB_ID" >> $GITHUB_ENV
-          echo "::set-output name=job_id::$JOB_ID"
+          JOB_ID=$(echo "$JOB_OUTPUT" | sed -n "s/.*'job_id': '\([^']*\)'.*/\1/p")
+          echo "Extracted job_id=$JOB_ID"
+          echo "job_id=$JOB_ID" >> "$GITHUB_OUTPUT"
 
       - name: Poll test status
         run: |
