@@ -34,6 +34,7 @@ def submit(
 def status(
     job_id: str = typer.Option(..., help="Job ID to check status for"),
     poll: bool = typer.Option(False, "--poll", help="Poll until job completes or fails"),
+    json_output: bool = typer.Option(False, "--json", help="Output result as JSON for CI parsing")
 ):
     """Check the status of a job."""
     from time import sleep
@@ -46,7 +47,13 @@ def status(
             typer.secho(result, fg=typer.colors.RED)
             sys.exit(1)
 
-        typer.secho(f"Job {job_id} → {result['status']}", fg=typer.colors.BLUE if result['status'] == 'in_progress' else (typer.colors.GREEN if result['status'] == 'completed' else typer.colors.RED))
+        if json_output:
+            import json as _json
+            typer.echo(_json.dumps(result))
+            if not poll or result["status"] in ("completed", "failed"):
+                sys.exit(1 if result["status"] == "failed" else 0)
+        else:
+            typer.secho(f"Job {job_id} → {result['status']}", fg=typer.colors.BLUE if result['status'] == 'in_progress' else (typer.colors.GREEN if result['status'] == 'completed' else typer.colors.RED))
 
         if not poll or result["status"] in ("completed", "failed"):
             sys.exit(1 if result["status"] == "failed" else 0)

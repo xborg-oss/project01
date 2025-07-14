@@ -42,7 +42,7 @@ jobs:
           docker compose logs job-server
 
       - name: Install qgjob CLI
-        run: pip install --upgrade qgjob==1.2.0
+        run: pip install --upgrade qgjob==1.4.0
 
       - name: Submit all test jobs
         id: submit
@@ -62,15 +62,33 @@ jobs:
           done
           echo "job_ids=$JOB_IDS" >> "$GITHUB_OUTPUT"
 
-      - name: Poll all test statuses
+      - name: Wait for jobs to complete
+        env:
+          QGJOB_API_BASE_URL: http://localhost:8000
+        run: |
+          echo "Waiting for all jobs to complete (timeout: 60 seconds)..."
+          sleep 60
+
+      - name: Check final job statuses
         env:
           QGJOB_API_BASE_URL: http://localhost:8000
         run: |
           set -e
+          FAILED_JOBS=""
           for JOB_ID in ${{ steps.submit.outputs.job_ids }}; do
-            echo "Polling status for job: $JOB_ID"
-            qgjob status --job-id=$JOB_ID --poll
+            echo "Checking final status for job: $JOB_ID"
+            STATUS=$(qgjob status --job-id=$JOB_ID --json | jq -r '.status')
+            echo "Job $JOB_ID status: $STATUS"
+            if [ "$STATUS" = "failed" ]; then
+              FAILED_JOBS="$FAILED_JOBS $JOB_ID"
+            fi
           done
+          if [ -n "$FAILED_JOBS" ]; then
+            echo "The following jobs failed: $FAILED_JOBS"
+            exit 1
+          else
+            echo "All jobs completed successfully!"
+          fi
 
       - name: Cleanup containers
         if: always()

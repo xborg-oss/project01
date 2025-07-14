@@ -1,79 +1,137 @@
-# qgjob
+# QualGent Backend Coding Challenge
 
-A CLI tool and backend to queue, group, and deploy AppWright test jobs across emulators, devices, and BrowserStack.
+A robust, scalable platform for queuing, grouping, and deploying AppWright test jobs across emulators, devices, and BrowserStack. Includes a CLI, backend orchestrator, and full CI/CD integration.
+
+---
 
 ## Features
-- Submit and track test jobs via CLI
-- Jobs grouped by app version and target for efficient batching
-- Prioritization and deduplication
-- Retry and failure handling
-- Scalable, modular backend
-- GitHub Actions integration
+- **CLI Tool (`qgjob`)**: Submit and track test jobs from the command line
+- **Backend Service**: Receives, groups, queues, and schedules jobs efficiently
+- **Job Grouping**: Batches jobs by `app_version_id` and `target` to minimize installs
+- **Prioritization & Deduplication**: Jobs are prioritized and deduplicated
+- **Retry & Failure Handling**: Automatic retries for failed jobs
+- **Horizontal Scalability**: Stateless orchestrator, scalable agents
+- **Monitoring**: Health and metrics endpoints
+- **GitHub Actions Integration**: End-to-end CI/CD, fails on test failure
 
-## Installation
-
-```bash
-pip install qgjob
-```
-
-## Usage
-
-```bash
-qgjob submit --org-id qualgent --app-version-id xyz123 --test tests/onboarding.spec.js --target emulator
-qgjob status --job-id abc456
-```
-
-## Setup (Local & Docker)
-
-### Local Backend
-- Requires Python 3.7+, Redis, and PostgreSQL (or use in-memory for demo)
-- Install dependencies: `pip install -r requirements.txt`
-- Start backend: `uvicorn job_server.main:app --reload`
-- Start agent(s): `python job_server/agent_worker.py --target emulator --app-version-id xyz123`
-
-### Docker Compose
-```bash
-docker compose up --build --scale agent=3
-```
+---
 
 ## Architecture
 
 ```mermaid
-flowchart TD
-    CLI["qgjob CLI"] -->|REST| API["Job Server API"]
-    API -->|Enqueue| Queue["Job Queue (Redis)"]
-    API -->|Status| DB[("Job DB")]
-    Scheduler["Scheduler"] -->|Assign Batch| Agent["Agent Worker(s)"]
-    Agent -->|Run Tests| Device["Device/Emulator/BrowserStack"]
-    Agent -->|Update| API
-    API -->|Status| CLI
+graph TD
+    subgraph CI/CD & User
+        CLI[qgjob CLI]
+        Actions[GitHub Actions]
+    end
+    subgraph Backend
+        API[Job Server API]
+        DB[(Postgres DB)]
+        REDIS[(Redis Queue)]
+        Scheduler[Scheduler]
+        Agent[Agent Worker(s)]
+    end
+    subgraph Test Infra
+        Device[Device/Emulator/BrowserStack]
+    end
+    CLI -- REST --> API
+    Actions -- REST --> API
+    API -- Persist --> DB
+    API -- Enqueue --> REDIS
+    Scheduler -- Assign Batch --> Agent
+    Agent -- Run Tests --> Device
+    Agent -- Update Status --> API
+    API -- Status --> CLI
+    API -- Status --> Actions
 ```
 
-## Grouping & Scheduling
-- Jobs are grouped by `app_version_id` and `target`.
-- Jobs with the same app version and target are batched to minimize app installs.
-- Prioritization: lower `priority` value = higher priority.
-- Deduplication: duplicate jobs (same org, app version, test, target) are blocked.
-- Retry: failed jobs are retried up to 3 times by default.
+---
 
-## End-to-End Example
-1. Start backend and agents (see Docker or local setup above).
-2. Submit a job:
+## Grouping & Scheduling
+- **Grouping**: Jobs are grouped by `app_version_id` and `target` (e.g., all jobs for the same app version and emulator are batched together).
+- **Batching**: Batches are assigned to available agents, minimizing app installs and maximizing efficiency.
+- **Prioritization**: Jobs are dequeued by priority (lower value = higher priority).
+- **Deduplication**: Duplicate jobs (same org, app version, test, target) are blocked.
+- **Retry**: Failed jobs are retried up to 3 times by default.
+
+---
+
+## Setup
+
+### Local Development
+1. **Install dependencies**:
    ```bash
-   qgjob submit --org-id qualgent --app-version-id xyz123 --test tests/onboarding.spec.js --target emulator
+   pip install -r requirements.txt
    ```
-3. Check status:
+2. **Start backend**:
    ```bash
-   qgjob status --job-id <job_id> --poll
+   uvicorn job_server.main:app --reload
    ```
-4. See results in CLI and backend logs.
+3. **Start agent(s)**:
+   ```bash
+   python job_server/agent_worker.py --target emulator --app-version-id all
+   ```
+
+### Docker Compose (Recommended for CI)
+```bash
+docker compose up -d --build
+```
+- Starts backend, Postgres, Redis, and a generic agent that can pick up any job.
+
+---
+
+## CLI Usage
+
+### Install
+```bash
+pip install --upgrade qgjob
+```
+
+### Submit a Job
+```bash
+qgjob submit --org-id qualgent --app-version-id xyz123 --test tests/onboarding.spec.js --target emulator --priority 2
+```
+
+### Check Job Status
+```bash
+qgjob status --job-id <job_id>
+```
+
+### Machine-Readable Output (for CI)
+```bash
+qgjob submit ... --json
+qgjob status --job-id <job_id> --json
+```
+
+---
 
 ## GitHub Actions Workflow
-See `.github/workflows/appwright-test.yml` for a full CI example:
-- Installs backend and CLI
-- Submits a test job
-- Polls for completion
-- Fails build if any test fails
+- **Fully automated**: Starts all services, submits all test jobs, waits, checks status, and fails if any test fails.
+- **No manual steps required**.
+
+Example (see `.github/workflows/appwright-test.yml`):
+```yaml
+- name: Install qgjob CLI
+  run: pip install --upgrade qgjob==1.4.0
+- name: Submit all test jobs
+  run: |
+    OUTPUT=$(qgjob submit ... --json)
+    # ...
+- name: Wait for jobs to complete
+  run: sleep 60
+- name: Check final job statuses
+  run: |
+    qgjob status --job-id=<job_id> --json
+    # ...
+```
+
+---
+
+## Monitoring
+- **Health**: `GET /healthz` returns `{ "status": "ok" }`
+- **Metrics**: `GET /metrics` returns job counts by status
+
+---
 
 ## Sample Output Logs
 ```
@@ -82,9 +140,18 @@ Job 1234abcd → in_progress
 Job 1234abcd → completed
 ```
 
-## Monitoring
-- Health: `GET /healthz`
-- Metrics: `GET /metrics`
+---
+
+## How the System Works
+1. **User or CI submits jobs via CLI**
+2. **Backend groups jobs by app_version_id and target**
+3. **Jobs are queued in Redis and persisted in Postgres**
+4. **Agents poll for jobs and execute batches efficiently**
+5. **Job status is updated and can be polled or checked via CLI or CI**
+6. **Failed jobs are retried up to 3 times**
+7. **Monitoring endpoints provide health and metrics**
+
+---
 
 ## License
 MIT
